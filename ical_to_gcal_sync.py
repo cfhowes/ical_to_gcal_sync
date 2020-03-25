@@ -26,13 +26,13 @@ handler.setFormatter(logging.Formatter('%(asctime)s|[%(levelname)s] %(message)s'
 logger.addHandler(handler)
 
 
-def get_current_events():
+def get_current_events(ical_feed_url):
     """Retrieves data from iCal iCal feed and returns an ics.Calendar object
     containing the parsed data.
 
     Returns the parsed Calendar object or None if an error occurs.
     """
-    resp = requests.get(ICAL_FEED)
+    resp = requests.get(ical_feed_url)
     if resp.status_code != 200:
         logger.error('> Error retrieving iCal feed!')
         return None
@@ -65,7 +65,7 @@ def get_credentials():
     return credentials
 
 
-def get_gcal_events(service, from_time, to_time):
+def get_gcal_events(service, gcal_id, from_time, to_time):
     """Retrieves the current set of Google Calendar events from the selected
     user calendar. Only includes upcoming events (those taking place from start
     of the current day.
@@ -83,7 +83,7 @@ def get_gcal_events(service, from_time, to_time):
     time_data = {'timeMin': from_time}
     if to_time:
         time_data['timeMax'] = to_time
-    eventsResult = service.events().list(calendarId=CALENDAR_ID,
+    eventsResult = service.events().list(calendarId=gcal_id,
                                          singleEvents=True,
                                          orderBy='startTime',
                                          showDeleted=True,
@@ -98,7 +98,7 @@ def get_gcal_events(service, from_time, to_time):
     # otherwise keep calling the method, passing back the nextPageToken each time
     while 'nextPageToken' in eventsResult:
         token = eventsResult['nextPageToken']
-        eventsResult = service.events().list(calendarId=CALENDAR_ID,
+        eventsResult = service.events().list(calendarId=gcal_id,
                                              timeMin=from_time,
                                              pageToken=token,
                                              singleEvents=True,
@@ -113,9 +113,15 @@ def get_gcal_events(service, from_time, to_time):
 
 
 def delete_all_events(service):
-    for gc in get_gcal_events(service):
+    for gc in get_gcal_events(
+            service=service,
+            gcal_id=CALENDAR_ID,
+            from_time=arrow.now().replace(
+                hour=0, minute=0, second=0, microsecond=0),
+            to_time=None):
         try:
-            service.events().delete(calendarId=CALENDAR_ID, eventId=gc['id']).execute()
+            service.events().delete(
+                calendarId=CALENDAR_ID, eventId=gc['id']).execute()
             time.sleep(API_SLEEP_TIME)
         except googleapiclient.errors.HttpError:
             pass  # event already marked as deleted
@@ -147,6 +153,67 @@ def create_id(uid, begintime, endtime):
     return UID_PREFIX + temp + str(arrow.get(begintime).timestamp) + \
         str(arrow.get(endtime).timestamp)
 
+
+def get_and_filter_ical_feed(ical_feed_url, days_to_sync):
+    # retrieve events from the iCal feed
+    logger.info('> Retrieving events from iCal feed')
+    print('get ical')
+    ical_cal = get_current_events(ical_feed_url=ical_feed_url)
+
+    if ical_cal is None:
+        sys.exit(-1)
+
+    # convert iCal event list into a dict indexed by (converted) iCal UID
+    ical_events = {}
+    for ev in ical_cal.events:
+        if not mmslogin.keep_ical_event(ev):
+            continue
+        # filter out events in the past, don't care about syncing them
+        if arrow.get(ev.begin) > today:
+            # optionally filter out events >24 hours ahead
+            if days_to_sync > 0:
+                tdelta = ev.begin - arrow.now()
+                if tdelta.days >= days_to_sync:
+                    logger.info(u'Filtering out event {} at {} due to ICAL_DAYS_TO_SYNC={}'.format(ev.name, ev.begin, days_to_sync))
+                else:
+                    ical_events[create_id(ev.uid, ev.begin, ev.end)] = ev
+            else:
+                ical_events[create_id(ev.uid, ev.begin, ev.end)] = ev
+
+    logger.debug('> Collected {:d} iCal events'.format(len(ical_events)))
+    print('> Collected {:d} iCal events'.format(len(ical_events)))
+    return ical_events
+
+
+def convert_ical_event_to_gcal(ical_event, gcal_tz):
+    """
+    Convert the ical_event to the gcal format.
+    """
+    gcal_event = {}
+    gcal_event['summary'] = ical_event.name
+    gcal_event['id'] = create_id(ical_event.uid,
+                                 ical_event.begin, ical_event.end)
+    gcal_event['description'] = f'{ical_event.description} (Imported from mycal.py)'
+    gcal_event['location'] = ical_event.location
+
+    # check if no time specified in iCal, treat as all day event if so
+    # @TODO: i think every event will have an end with this code.
+    delta = arrow.get(ical_event.end) - arrow.get(ical_event.begin)
+    # TODO multi-day events?
+    if delta.days >= 1:
+        gcal_event['start'] = get_gcal_date(ical_event.begin)
+        logger.info(f'iCal all-day event {ical_event.name} at {ical_event.begin}')
+        if ical_event.has_end:
+            gcal_event['end'] = get_gcal_date(ical_event.end)
+    else:
+        gcal_event['start'] = get_gcal_datetime(ical_event.begin, gcal_tz)
+        logger.info(u'iCal event {ical_event.name} at {ical_event.begin}')
+        if ical_event.has_end:
+            gcal_event['end'] = get_gcal_datetime(ical_event.end, gcal_tz)
+
+    return gcal_event
+
+
 if __name__ == '__main__':
     # setting up Google Calendar API for use
     logger.debug('> Loading credentials')
@@ -161,39 +228,14 @@ if __name__ == '__main__':
                     datetime.timedelta(days=ICAL_DAYS_TO_SYNC)).isoformat()
     else:
         end_time = None
-    gcal_events = get_gcal_events(service, today.isoformat(), end_time)
+    gcal_events = get_gcal_events(service, CALENDAR_ID, today.isoformat(), end_time)
 
-    # retrieve events from the iCal feed
-    logger.info('> Retrieving events from iCal feed')
-    print('get ical')
-    ical_cal = get_current_events()
-    # print(ical_cal)
-
-    if ical_cal is None:
-        sys.exit(-1)
-
-    # convert iCal event list into a dict indexed by (converted) iCal UID
-    ical_events = {}
-    for ev in ical_cal.events:
-        if not mmslogin.keep_ical_event(ev):
-            continue
-        # filter out events in the past, don't care about syncing them
-        if arrow.get(ev.begin) > today:
-            # optionally filter out events >24 hours ahead
-            if ICAL_DAYS_TO_SYNC > 0:
-                tdelta = ev.begin - arrow.now()
-                if tdelta.days >= ICAL_DAYS_TO_SYNC:
-                    logger.info(u'Filtering out event {} at {} due to ICAL_DAYS_TO_SYNC={}'.format(ev.name, ev.begin, ICAL_DAYS_TO_SYNC))
-                else:
-                    ical_events[create_id(ev.uid, ev.begin, ev.end)] = ev
-            else:
-                ical_events[create_id(ev.uid, ev.begin, ev.end)] = ev
-
-    logger.debug('> Collected {:d} iCal events'.format(len(ical_events)))
-    print('> Collected {:d} iCal events'.format(len(ical_events)))
+    ical_events = get_and_filter_ical_feed(
+        ical_feed_url=ICAL_FEED, days_to_sync=ICAL_DAYS_TO_SYNC)
 
     # retrieve the Google Calendar object itself
     gcal_cal = service.calendars().get(calendarId=CALENDAR_ID).execute()
+    gcal_tz = gcal_cal['timeZone']
 
     logger.info('> Processing Google Calendar events...')
     print('processing gcal', len(gcal_events))
@@ -222,45 +264,28 @@ if __name__ == '__main__':
             except googleapiclient.errors.HttpError:
                 pass # event already marked as deleted
         else:
-            ical_event = ical_events[eid]
-            gcal_begin = arrow.get(gcal_event['start'].get('dateTime', gcal_event['start'].get('date')))
-            gcal_end = arrow.get(gcal_event['end'].get('dateTime', gcal_event['end'].get('date')))
+            # Get the ical_event and remove it from the list.
+            ical_event = ical_events.pop(eid)
 
-            gcal_has_location = 'location' in gcal_event
-            ical_has_location = ical_event.location is not None
+            mmslogin.set_ical_description(ical_event)
+            event_dict = convert_ical_event_to_gcal(
+                ical_event=ical_event, gcal_tz=gcal_tz)
 
-            # event name can be left unset, in which case there's no summary field
-            gcal_name = gcal_event.get('summary', None)
-            log_name = '<unnamed event>' if gcal_name is None else gcal_name
+            # check if the iCal event has a different: start/end time, name,
+            # location, or description, and if so sync the changes to the GCal
+            # event
+            if gcal_event['summary'] != event_dict['summary'] \
+               or gcal_event['description'] != event_dict['description'] \
+               or gcal_event['location'] != event_dict['location'] \
+               or gcal_event['start'] != event_dict['start'] \
+               or gcal_event['end'] != event_dict['end']:
 
-            # check if the iCal event has a different: start/end time, name, location,
-            # or description, and if so sync the changes to the GCal event
-            if gcal_begin != ical_event.begin \
-                or gcal_end != ical_event.end \
-                or gcal_name != ical_event.name \
-                or gcal_has_location != ical_has_location \
-                or (gcal_has_location and gcal_event['location'] != ical_event.location) \
-                or not gcal_event['description'].startswith(ical_event.description):
+                logger.info(f'> Updating event "{eid}" due to change...')
+                gcal_event.update(event_dict)
 
-                logger.info(u'> Updating event "{}" due to date/time change...'.format(log_name))
-                mmslogin.set_ical_description(ical_event)
-                delta = arrow.get(ical_event.end) - arrow.get(ical_event.begin)
-                # all-day events handled slightly differently
-                # TODO multi-day events?
-                if delta.days >= 1:
-                    gcal_event['start'] = get_gcal_date(ical_event.begin)
-                    gcal_event['end'] = get_gcal_date(ical_event.end)
-                else:
-                    gcal_event['start'] = get_gcal_datetime(ical_event.begin, gcal_cal['timeZone'])
-                    if ical_event.has_end:
-                        gcal_event['end']   = get_gcal_datetime(ical_event.end, gcal_cal['timeZone'])
-
-                gcal_event['summary'] = ical_event.name
-                gcal_event['description'] = '%s (Imported from mycal.py)' % ical_event.description
-                gcal_event['source'] = {'title': 'imported from ical_to_gcal_sync.py', 'url': ICAL_FEED}
-                gcal_event['location'] = ical_event.location
-
-                service.events().update(calendarId=CALENDAR_ID, eventId=eid, body=gcal_event).execute()
+                service.events().update(
+                    calendarId=CALENDAR_ID,
+                    eventId=eid, body=gcal_event).execute()
                 print('did update')
                 time.sleep(API_SLEEP_TIME)
 
@@ -268,34 +293,16 @@ if __name__ == '__main__':
     logger.info('> Processing iCal events...')
     print('processing ical')
     for ical_event in ical_events.values():
-        if create_id(ical_event.uid, ical_event.begin, ical_event.end) not in gcal_event_ids:
-            mmslogin.set_ical_description(ical_event)
+        mmslogin.set_ical_description(ical_event)
+        gcal_event = convert_ical_event_to_gcal(
+            ical_event=ical_event, gcal_tz=gcal_tz)
 
-            gcal_event = {}
-            gcal_event['summary'] = ical_event.name
-            gcal_event['id'] = create_id(ical_event.uid, ical_event.begin, ical_event.end)
-            gcal_event['description'] = '%s (Imported from mycal.py)' % ical_event.description
-            gcal_event['location'] = ical_event.location
-
-            # check if no time specified in iCal, treat as all day event if so
-            delta = arrow.get(ical_event.end) - arrow.get(ical_event.begin)
-            # TODO multi-day events?
-            if delta.days >= 1:
-                gcal_event['start'] = get_gcal_date(ical_event.begin)
-                logger.info(u'iCal all-day event {} to be added at {}'.format(ical_event.name, ical_event.begin))
-                print('all day event')
-                if ical_event.has_end:
-                    gcal_event['end'] = get_gcal_date(ical_event.end)
-            else:
-                gcal_event['start'] = get_gcal_datetime(ical_event.begin, gcal_cal['timeZone'])
-                logger.info(u'iCal event {} to be added at {}'.format(ical_event.name, ical_event.begin))
-                print('regular event')
-                if ical_event.has_end:
-                    gcal_event['end'] = get_gcal_datetime(ical_event.end, gcal_cal['timeZone'])
-
-            try:
-                time.sleep(API_SLEEP_TIME)
-                service.events().insert(calendarId=CALENDAR_ID, body=gcal_event).execute()
-            except:
-                time.sleep(API_SLEEP_TIME)
-                service.events().update(calendarId=CALENDAR_ID, eventId=gcal_event['id'], body=gcal_event).execute()
+        try:
+            time.sleep(API_SLEEP_TIME)
+            service.events().insert(
+                calendarId=CALENDAR_ID, body=gcal_event).execute()
+        except:
+            time.sleep(API_SLEEP_TIME)
+            service.events().update(
+                calendarId=CALENDAR_ID,
+                eventId=gcal_event['id'], body=gcal_event).execute()
