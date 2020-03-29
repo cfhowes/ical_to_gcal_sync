@@ -14,15 +14,16 @@ import requests
 import ics
 import arrow
 
-from auth import auth_with_calendar_api
-from config import *
+from .auth import auth_with_calendar_api
+from .config import *
 
 import mmslogin
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 handler = logging.FileHandler(filename=LOGFILE, mode='a')
-handler.setFormatter(logging.Formatter('%(asctime)s|[%(levelname)s] %(message)s'))
+handler.setFormatter(
+    logging.Formatter('%(asctime)s|[%(levelname)s] %(message)s'))
 logger.addHandler(handler)
 
 
