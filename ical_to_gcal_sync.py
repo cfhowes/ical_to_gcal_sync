@@ -154,19 +154,35 @@ def create_id(uid, begintime, endtime, prefix):
     return f'{temp}{begintime.timestamp}{endtime.timestamp}'
 
 
-def get_and_filter_ical_feed(ical_feed_url, days_to_sync, event_id_prefix):
+def get_and_filter_ical_feed(ical_feed_url, days_to_sync, event_id_prefix,
+                             filter_func=None):
+    """
+    Fetch the data from the ical feed and filter it based on event dates.
+
+    Args:
+      ical_feed_url (str): The URL of the ical feed to fetch.
+      days_to_sync (int): How many days of events to sync. Set to 0 to sync
+        all future days from the feed.
+      event_id_prefix (str): The prefix that will be used in creating the
+        event's unique ID.
+      filter_func (function): This is a function that takes an ical Event
+        as a parameter and returns True if the event should be kept.
+    Returns:
+      dict of ics.event.Event objects, with the gcal UID as the key.
+    """
+    today = arrow.now().replace(hour=0, minute=0, second=0, microsecond=0)
     # retrieve events from the iCal feed
     logger.info('> Retrieving events from iCal feed')
     print('get ical')
     ical_cal = get_current_events(ical_feed_url=ical_feed_url)
 
     if ical_cal is None:
-        sys.exit(-1)
+        return None
 
     # convert iCal event list into a dict indexed by (converted) iCal UID
     ical_events = {}
     for ev in ical_cal.events:
-        if not mmslogin.keep_ical_event(ev):
+        if filter_func is not None and not filter_func(ev):
             continue
         # filter out events in the past, don't care about syncing them
         if arrow.get(ev.begin) > today:
@@ -190,6 +206,13 @@ def get_and_filter_ical_feed(ical_feed_url, days_to_sync, event_id_prefix):
 def convert_ical_event_to_gcal(ical_event, gcal_tz, event_id_prefix):
     """
     Convert the ical_event to the gcal format.
+
+    Args:
+      ical_event (ical.event.Event): The ical event to convert.
+      gcal_tz (str): The standardized timezone string from the gcal.
+      event_id_prefix (str): The prefix for the gcal event UID.
+    Returns:
+      dict: gcal event dict to pass to the gcal API.
     """
     gcal_event = {}
     gcal_event['summary'] = ical_event.name
@@ -236,7 +259,12 @@ if __name__ == '__main__':
 
     ical_events = get_and_filter_ical_feed(
         ical_feed_url=ICAL_FEED, days_to_sync=ICAL_DAYS_TO_SYNC,
-        event_id_prefix=UID_PREFIX)
+        event_id_prefix=UID_PREFIX, filter_func=mmslogin.keep_ical_event)
+    if ical_events is None:
+        # There was nothing found on the ical feed. Just exit rather than
+        # delete all the events from gcal.
+        logger.error('No events in ical feed, exiting')
+        sys.exit(-1)
 
     # retrieve the Google Calendar object itself
     gcal_cal = service.calendars().get(calendarId=CALENDAR_ID).execute()
