@@ -2,6 +2,7 @@ from dateutil.tz import tzutc
 import os
 
 import arrow
+import ics
 from googleapiclient.discovery import build
 from googleapiclient.http import HttpMockSequence
 import pytest
@@ -143,3 +144,58 @@ def test_create_id():
     uid = create_id('foo', begin_date, end_date, 'bar')
     assert uid.startswith('barfoo')
     assert uid.endswith(suffix)
+
+
+def test_get_and_filter_ical_feed(requests_mock):
+    """
+    Validate the filtering mechanism of the ical feed.
+    """
+    ical_feed_url = 'https://testapp.com/icalfeed'
+    # Calendar with 10 valid events.
+    requests_mock.get(ical_feed_url, text=MOCK_ICS_FEED_RESPONSE)
+
+    resp = get_and_filter_ical_feed(ical_feed_url, 0, 'bob')
+    assert len(resp) == 10
+
+    # The events in our mock file are from June and July of the year 2222.
+    # If this code is still running in 2222, I will be 242 years young!
+    day_count = (arrow.get(2222, 7, 1) - arrow.now()).days
+    resp = get_and_filter_ical_feed(ical_feed_url, day_count, 'bob')
+    assert len(resp) == 3
+
+    def filter_func(ical_event):
+        # A simple filter for testing.
+        eint = 0
+        try:
+            eint = int(ical_event.name[-1])
+        except:
+            pass
+        return (eint % 2) == 0
+
+    resp = get_and_filter_ical_feed(ical_feed_url, 0, 'bob', filter_func)
+    assert len(resp) == 5
+
+
+def test_convert_ical_event_to_gcal():
+    """
+    Test the conversion from ical event format to the gcal event dict.
+    """
+    begin_date = arrow.get(2020, 3, 4, 4, 15, 30)
+    end_date = arrow.get(2020, 3, 4, 10, 15, 30)
+    gcal_tz = 'America/Los_Angeles'
+
+    ical_event = ics.event.Event(name='Test Event 1',
+                                 begin=begin_date,
+                                 end=end_date,
+                                 uid='42',
+                                 description='Test Descriptions for Event 1',
+                                 location='Conference Room 1')
+
+    resp = convert_ical_event_to_gcal(ical_event, gcal_tz, 'bob')
+    assert resp['summary'] == ical_event.name
+    assert resp['id'].startswith('bob42')
+    assert resp['description'].startswith(ical_event.description)
+    assert resp['location'] == ical_event.location
+    # The conversion of the start and end times was tested above.
+    assert resp['start'] is not None
+    assert resp['end'] is not None
