@@ -14,8 +14,8 @@ import requests
 import ics
 import arrow
 
-from .auth import auth_with_calendar_api
-from .config import *
+from auth import auth_with_calendar_api
+from config import *
 
 import mmslogin
 
@@ -110,33 +110,51 @@ def delete_all_events(service):
 
 
 def get_gcal_datetime(arrow_datetime, gcal_timezone, replace_utc=True):
+    """
+    Will update the passed in datetime object with the proper timezone and
+    output it in the format required by Google Calendar.
+
+    Args:
+      arrow_datetime: An arrow datatime object.
+      gcal_timesone: A tzinfo object of the desired timezone.
+      replace_utc: If True will *replace* the UTC timezone on the
+        arrow_datetime. This works around an issue were some ical feeds return
+        data in a local timezone, but don't include tzinfo on those dates.
+    Returns:
+      dict: A Google Calendar datetime + timeZone dict to pass to the gcal API.
+    """
     if replace_utc and arrow_datetime.tzinfo == tzutc():
         arrow_datetime = arrow_datetime.replace(tzinfo=gcal_timezone)
     arrow_datetime = arrow_datetime.to(gcal_timezone)
-    return {u'dateTime': arrow_datetime.format('YYYY-MM-DDTHH:mm:ssZZ'), 'timeZone': gcal_timezone}
+    return {u'dateTime': arrow_datetime.format('YYYY-MM-DDTHH:mm:ssZZ'),
+            'timeZone': gcal_timezone}
 
 
 def get_gcal_date(arrow_datetime):
+    """
+    Convert a datetime object to a google calendar date dict.
+    """
     return {u'date': arrow_datetime.format('YYYY-MM-DD')}
 
 
-def create_id(uid, begintime, endtime):
+def create_id(uid, begintime, endtime, prefix):
     """ Converts ical UUID, begin and endtime to a valid Gcal ID
 
-    Characters allowed in the ID are those used in base32hex encoding, i.e. lowercase letters a-v and digits 0-9, see section 3.1.2 in RFC2938
-    Te length of the ID must be between 5 and 1024 characters
+    Characters allowed in the ID are those used in base32hex encoding, i.e.
+    lowercase letters a-v and digits 0-9, see section 3.1.2 in RFC2938
+
+    The length of the ID must be between 5 and 1024 characters
     https://developers.google.com/resources/api-libraries/documentation/calendar/v3/python/latest/calendar_v3.events.html
 
     Returns:
         ID
     """
     allowed_chars = string.ascii_lowercase[:22] + string.digits
-    temp = re.sub('[^{}]'.format(allowed_chars), '', uid.lower())
-    return UID_PREFIX + temp + str(arrow.get(begintime).timestamp) + \
-        str(arrow.get(endtime).timestamp)
+    temp = re.sub('[^{}]'.format(allowed_chars), '', f'{prefix}{uid.lower()}')
+    return f'{temp}{begintime.timestamp}{endtime.timestamp}'
 
 
-def get_and_filter_ical_feed(ical_feed_url, days_to_sync):
+def get_and_filter_ical_feed(ical_feed_url, days_to_sync, event_id_prefix):
     # retrieve events from the iCal feed
     logger.info('> Retrieving events from iCal feed')
     print('get ical')
@@ -158,23 +176,27 @@ def get_and_filter_ical_feed(ical_feed_url, days_to_sync):
                 if tdelta.days >= days_to_sync:
                     logger.info(u'Filtering out event {} at {} due to ICAL_DAYS_TO_SYNC={}'.format(ev.name, ev.begin, days_to_sync))
                 else:
-                    ical_events[create_id(ev.uid, ev.begin, ev.end)] = ev
+                    ical_events[create_id(
+                        ev.uid, ev.begin, ev.end, event_id_prefix)] = ev
             else:
-                ical_events[create_id(ev.uid, ev.begin, ev.end)] = ev
+                ical_events[create_id(
+                    ev.uid, ev.begin, ev.end, event_id_prefix)] = ev
 
     logger.debug('> Collected {:d} iCal events'.format(len(ical_events)))
     print('> Collected {:d} iCal events'.format(len(ical_events)))
     return ical_events
 
 
-def convert_ical_event_to_gcal(ical_event, gcal_tz):
+def convert_ical_event_to_gcal(ical_event, gcal_tz, event_id_prefix):
     """
     Convert the ical_event to the gcal format.
     """
     gcal_event = {}
     gcal_event['summary'] = ical_event.name
     gcal_event['id'] = create_id(ical_event.uid,
-                                 ical_event.begin, ical_event.end)
+                                 ical_event.begin,
+                                 ical_event.end,
+                                 event_id_prefix)
     gcal_event['description'] = f'{ical_event.description} (Imported from mycal.py)'
     gcal_event['location'] = ical_event.location
 
@@ -213,7 +235,8 @@ if __name__ == '__main__':
     gcal_events = get_gcal_events(service, CALENDAR_ID, today.isoformat(), end_time)
 
     ical_events = get_and_filter_ical_feed(
-        ical_feed_url=ICAL_FEED, days_to_sync=ICAL_DAYS_TO_SYNC)
+        ical_feed_url=ICAL_FEED, days_to_sync=ICAL_DAYS_TO_SYNC,
+        event_id_prefix=UID_PREFIX)
 
     # retrieve the Google Calendar object itself
     gcal_cal = service.calendars().get(calendarId=CALENDAR_ID).execute()
@@ -251,7 +274,8 @@ if __name__ == '__main__':
 
             mmslogin.set_ical_description(ical_event)
             event_dict = convert_ical_event_to_gcal(
-                ical_event=ical_event, gcal_tz=gcal_tz)
+                ical_event=ical_event, gcal_tz=gcal_tz,
+                event_id_prefix=UID_PREFIX)
 
             # check if the iCal event has a different: start/end time, name,
             # location, or description, and if so sync the changes to the GCal
@@ -277,7 +301,8 @@ if __name__ == '__main__':
     for ical_event in ical_events.values():
         mmslogin.set_ical_description(ical_event)
         gcal_event = convert_ical_event_to_gcal(
-            ical_event=ical_event, gcal_tz=gcal_tz)
+            ical_event=ical_event, gcal_tz=gcal_tz,
+            event_id_prefix=UID_PREFIX)
 
         try:
             time.sleep(API_SLEEP_TIME)

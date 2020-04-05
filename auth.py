@@ -5,7 +5,7 @@ from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 
-from .config import CREDENTIAL_PATH, CLIENT_SECRET_FILE, SCOPES
+from config import CREDENTIAL_PATH, CLIENT_SECRET_FILE, SCOPES
 
 
 def auth_with_calendar_api():
