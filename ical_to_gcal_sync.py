@@ -182,8 +182,6 @@ def get_and_filter_ical_feed(ical_feed_url, days_to_sync, event_id_prefix,
     # convert iCal event list into a dict indexed by (converted) iCal UID
     ical_events = {}
     for ev in ical_cal.events:
-        if filter_func is not None and not filter_func(ev):
-            continue
         # filter out events in the past, don't care about syncing them
         if arrow.get(ev.begin) > today:
             # optionally filter out events >24 hours ahead
@@ -191,12 +189,11 @@ def get_and_filter_ical_feed(ical_feed_url, days_to_sync, event_id_prefix,
                 tdelta = ev.begin - arrow.now()
                 if tdelta.days >= days_to_sync:
                     logger.info(u'Filtering out event {} at {} due to ICAL_DAYS_TO_SYNC={}'.format(ev.name, ev.begin, days_to_sync))
-                else:
-                    ical_events[create_id(
-                        ev.uid, ev.begin, ev.end, event_id_prefix)] = ev
-            else:
-                ical_events[create_id(
-                    ev.uid, ev.begin, ev.end, event_id_prefix)] = ev
+                    continue
+        if filter_func is not None and not filter_func(ev):
+            continue
+        ical_events[create_id(
+            ev.uid, ev.begin, ev.end, event_id_prefix)] = ev
 
     logger.debug('> Collected {:d} iCal events'.format(len(ical_events)))
     print('> Collected {:d} iCal events'.format(len(ical_events)))
