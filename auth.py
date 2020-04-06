@@ -4,6 +4,7 @@ import pickle
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
+from google.oauth2 import service_account
 
 from config import CREDENTIAL_PATH, CLIENT_SECRET_FILE, SCOPES
 
@@ -38,4 +39,19 @@ def auth_with_calendar_api():
 
     service = build('calendar', 'v3', credentials=creds)
 
+    return service
+
+
+def auth_with_calendar_via_service_account(creds_file_path):
+    JSON_KEY_FILE = os.path.join(os.path.dirname(__file__),
+                             'credentials',
+                             'LittleMissionStudio-b589c8731138.json')
+
+    scopes = ['https://www.googleapis.com/auth/calendar.readonly',
+              'https://www.googleapis.com/auth/calendar.events']
+
+    creds = service_account.Credentials.from_service_account_file(
+        creds_file_path, scopes=scopes)
+
+    service = build('calendar', 'v3', credentials=creds)
     return service
