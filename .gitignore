@@ -90,3 +90,7 @@ ENV/
 
 # eamcs auto-save files
 *~
+
+# credentials
+ical_to_gcal_sync.pckl
+ical_to_gcal_sync_client_secret.json
