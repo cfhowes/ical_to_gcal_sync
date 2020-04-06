@@ -43,10 +43,9 @@ def auth_with_calendar_api():
 
 
 def auth_with_calendar_via_service_account(creds_file_path):
-    JSON_KEY_FILE = os.path.join(os.path.dirname(__file__),
-                             'credentials',
-                             'LittleMissionStudio-b589c8731138.json')
-
+    """
+    Authenticate the gcal service using a service account.
+    """
     scopes = ['https://www.googleapis.com/auth/calendar.readonly',
               'https://www.googleapis.com/auth/calendar.events']
 
