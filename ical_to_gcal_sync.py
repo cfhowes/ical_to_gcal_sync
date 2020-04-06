@@ -338,7 +338,6 @@ if __name__ == '__main__':
     logger.info('> Processing iCal events...')
     print('processing ical')
     for ical_event in ical_events.values():
-        mmslogin.set_ical_description(ical_event)
         gcal_event = convert_ical_event_to_gcal(
             ical_event=ical_event, gcal_tz=gcal_tz,
             event_id_prefix=UID_PREFIX)
