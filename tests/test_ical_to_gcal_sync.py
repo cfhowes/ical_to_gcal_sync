@@ -199,3 +199,106 @@ def test_convert_ical_event_to_gcal():
     # The conversion of the start and end times was tested above.
     assert resp['start'] is not None
     assert resp['end'] is not None
+
+
+def test_delete_or_update_gcal_events(caplog):
+    """
+    Test that given a set of gcal and ical events that the proper ones are
+    deleted or updated.
+    """
+    f = open(os.path.join(os.path.dirname(__file__),
+                          'gcal_service_discovery.json'), 'rb')
+    discovery_data = f.read()
+    f.close()
+
+    http = HttpMockSequence([
+        ({'status': '200'}, discovery_data),
+        ({'status': '200'}, 'echo_request_uri'),  # Delete Call
+        ({'status': '200'}, 'echo_request_body'),  # Update Call
+    ])
+
+    # Auth seems to be not needed when mocked.
+    service = build('calendar', 'v3', http=http)
+    assert len(http._iterable) == 2
+
+    gcal_events = []
+    # Create 4 gcal events:
+    # Non-matching ID prefix
+    gcal_events.append({
+        'id': '12345',
+        'summary': '',
+        'description': '',
+        'location': '',
+        'start': {'dateTime': '2020-03-04T04:15:30-08:00',
+                  'timeZone': 'America/Los_Angeles'},
+        'end': {'dateTime': '2020-03-04T10:15:30-08:00',
+                'timeZone': 'America/Los_Angeles'}
+    })
+    # Event not in ical feed
+    gcal_events.append({
+        'id': 'bob4215832953301583316930',
+        'summary': 'Test 1',
+        'description': 'Descr 1',
+        'location': 'Location 1',
+        'start': {'dateTime': '2020-03-04T04:15:30-08:00',
+                  'timeZone': 'America/Los_Angeles'},
+        'end': {'dateTime': '2020-03-04T10:15:30-08:00',
+                'timeZone': 'America/Los_Angeles'}
+    })
+    # Event updated in ical feed
+    gcal_events.append({
+        'id': 'bob4315832953301583316930',
+        'summary': 'Test 2',
+        'description': 'Descr 2',
+        'location': 'Location 2',
+        'start': {'dateTime': '2020-03-04T04:15:30-08:00',
+                  'timeZone': 'America/Los_Angeles'},
+        'end': {'dateTime': '2020-03-04T10:15:30-08:00',
+                'timeZone': 'America/Los_Angeles'}
+    })
+    # Event matches ical feed
+    gcal_events.append({
+        'id': 'bob4415832953301583316930',
+        'summary': 'Test 3',
+        'description': 'Descr 3 (Imported from mycal.py)',
+        'location': 'Location 3',
+        'start': {'dateTime': '2020-03-04T04:15:30-08:00',
+                  'timeZone': 'America/Los_Angeles'},
+        'end': {'dateTime': '2020-03-04T10:15:30-08:00',
+                'timeZone': 'America/Los_Angeles'}
+    })
+
+    # Now make 2 ical events, one that is updated, and one that matches.
+    ical_events = {}
+    begin_date = arrow.get(2020, 3, 4, 4, 15, 30)
+    end_date = arrow.get(2020, 3, 4, 10, 15, 30)
+    ical_events['bob4315832953301583316930'] = ics.event.Event(
+        name='Test 2',
+        begin=begin_date,
+        end=end_date,
+        uid='43',
+        description='Descr 2',
+        location='Updated Location')
+    ical_events['bob4415832953301583316930'] = ics.event.Event(
+        name='Test 3',
+        begin=begin_date,
+        end=end_date,
+        uid='44',
+        description='Descr 3',
+        location='Location 3')
+
+    delete_or_update_gcal_events(
+        gcal_events=gcal_events, gcal_id='42', gcal_service=service,
+        gcal_tz='America/Los_Angeles',
+        ical_events=ical_events, event_id_prefix='bob')
+
+    # All ical events were processed by this call.
+    assert len(ical_events) == 0
+    # All gcal api calls were made.
+    assert len(http._iterable) == 0
+    # Check log messages to see if we did what we said we would.
+    assert len(caplog.records) == 5
+    log_msgs = [r.getMessage() for r in caplog.records]
+    assert '> Deleting event "Test 1" from Google Calendar...' in log_msgs
+    assert '> Updating event "bob4315832953301583316930" due to change...' in \
+        log_msgs

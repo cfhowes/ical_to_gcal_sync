@@ -238,6 +238,60 @@ def convert_ical_event_to_gcal(ical_event, gcal_tz, event_id_prefix):
     return gcal_event
 
 
+def delete_or_update_gcal_events(gcal_events, gcal_id, gcal_service, gcal_tz,
+                                 ical_events, event_id_prefix):
+    # first check the set of Google Calendar events against the list of iCal
+    # events. Any events in Google Calendar that are no longer in iCal feed
+    # get deleted. Any events still present but with changed start/end times
+    # get updated.
+    for gcal_event in gcal_events:
+        eid = gcal_event['id']
+
+        if eid.startswith(event_id_prefix) and eid not in ical_events:
+            # if a gcal event has been deleted from iCal, also delete it from
+            # gcal. Apparently calling delete() only marks an event as
+            # "deleted" but doesn't remove it from the calendar, so it will
+            # continue to stick around. If you keep seeing messages about
+            # events being deleted here, you can try going to the Google
+            # Calendar site, opening the options menu for your calendar,
+            # selecting "View bin" and then clicking "Empty bin now" to
+            # completely delete these events.
+            try:
+                logger.info(
+                    u'> Deleting event "{}" from Google Calendar...'.format(
+                        gcal_event.get('summary', '<unnamed event>')))
+                gcal_service.events().delete(calendarId=gcal_id,
+                                             eventId=eid).execute()
+                time.sleep(API_SLEEP_TIME)
+            except googleapiclient.errors.HttpError:
+                pass  # event already marked as deleted
+        elif eid.startswith(event_id_prefix):
+            # Get the ical_event and remove it from the list.
+            ical_event = ical_events.pop(eid)
+
+            event_dict = convert_ical_event_to_gcal(
+                ical_event=ical_event, gcal_tz=gcal_tz,
+                event_id_prefix=event_id_prefix)
+
+            # check if the iCal event has a different: start/end time, name,
+            # location, or description, and if so sync the changes to the GCal
+            # event
+            if gcal_event['summary'] != event_dict['summary'] \
+               or gcal_event['description'] != event_dict['description'] \
+               or gcal_event['location'] != event_dict['location'] \
+               or gcal_event['start'] != event_dict['start'] \
+               or gcal_event['end'] != event_dict['end']:
+
+                logger.info(f'> Updating event "{eid}" due to change...')
+                gcal_event.update(event_dict)
+
+                gcal_service.events().update(
+                    calendarId=gcal_id,
+                    eventId=eid, body=gcal_event).execute()
+                time.sleep(API_SLEEP_TIME)
+    return
+
+
 if __name__ == '__main__':
     # setting up Google Calendar API for use
     logger.debug('> Loading credentials')
@@ -275,50 +329,9 @@ if __name__ == '__main__':
     # events. Any events in Google Calendar that are no longer in iCal feed
     # get deleted. Any events still present but with changed start/end times
     # get updated.
-    for gcal_event in gcal_events:
-        eid = gcal_event['id']
-
-        if eid not in ical_events:
-            # if a gcal event has been deleted from iCal, also delete it from gcal.
-            # Apparently calling delete() only marks an event as "deleted" but doesn't
-            # remove it from the calendar, so it will continue to stick around.
-            # If you keep seeing messages about events being deleted here, you can
-            # try going to the Google Calendar site, opening the options menu for
-            # your calendar, selecting "View bin" and then clicking "Empty bin
-            # now" to completely delete these events.
-            try:
-                logger.info(u'> Deleting event "{}" from Google Calendar...'.format(gcal_event.get('summary', '<unnamed event>')))
-                print('do delete')
-                service.events().delete(calendarId=CALENDAR_ID, eventId=eid).execute()
-                time.sleep(API_SLEEP_TIME)
-            except googleapiclient.errors.HttpError:
-                pass # event already marked as deleted
-        else:
-            # Get the ical_event and remove it from the list.
-            ical_event = ical_events.pop(eid)
-
-            mmslogin.set_ical_description(ical_event)
-            event_dict = convert_ical_event_to_gcal(
-                ical_event=ical_event, gcal_tz=gcal_tz,
-                event_id_prefix=UID_PREFIX)
-
-            # check if the iCal event has a different: start/end time, name,
-            # location, or description, and if so sync the changes to the GCal
-            # event
-            if gcal_event['summary'] != event_dict['summary'] \
-               or gcal_event['description'] != event_dict['description'] \
-               or gcal_event['location'] != event_dict['location'] \
-               or gcal_event['start'] != event_dict['start'] \
-               or gcal_event['end'] != event_dict['end']:
-
-                logger.info(f'> Updating event "{eid}" due to change...')
-                gcal_event.update(event_dict)
-
-                service.events().update(
-                    calendarId=CALENDAR_ID,
-                    eventId=eid, body=gcal_event).execute()
-                print('did update')
-                time.sleep(API_SLEEP_TIME)
+    delete_or_update_gcal_events(
+        gcal_events=gcal_events, gcal_id=CALENDAR_ID, gcal_service=service,
+        gcal_tz=gcal_tz, ical_events=ical_events, event_id_prefix=UID_PREFIX)
 
     # now add any iCal events not already in the Google Calendar
     logger.info('> Processing iCal events...')
