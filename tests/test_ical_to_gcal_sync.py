@@ -161,7 +161,7 @@ def test_get_and_filter_ical_feed(requests_mock):
     # If this code is still running in 2222, I will be 242 years young!
     day_count = (arrow.get(2222, 7, 1) - arrow.now()).days
     resp = get_and_filter_ical_feed(ical_feed_url, day_count, 'bob')
-    assert len(resp) == 3
+    assert len(resp) == 2
 
     def filter_func(ical_event):
         # A simple filter for testing.
