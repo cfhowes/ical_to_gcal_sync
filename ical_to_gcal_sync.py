@@ -154,15 +154,16 @@ def create_id(uid, begintime, endtime, prefix):
     return f'{temp}{begintime.timestamp}{endtime.timestamp}'
 
 
-def get_and_filter_ical_feed(ical_feed_url, days_to_sync, event_id_prefix,
-                             filter_func=None):
+def get_and_filter_ical_feed(ical_feed_url, start_time, end_time,
+                             event_id_prefix, filter_func=None):
     """
     Fetch the data from the ical feed and filter it based on event dates.
 
     Args:
       ical_feed_url (str): The URL of the ical feed to fetch.
-      days_to_sync (int): How many days of events to sync. Set to 0 to sync
-        all future days from the feed.
+      start_time (datetime): The start time of events to keep.
+      end_time(datetime): The end time of events to keep, None to keep all
+        events in the future.
       event_id_prefix (str): The prefix that will be used in creating the
         event's unique ID.
       filter_func (function): This is a function that takes an ical Event
@@ -170,7 +171,6 @@ def get_and_filter_ical_feed(ical_feed_url, days_to_sync, event_id_prefix,
     Returns:
       dict of ics.event.Event objects, with the gcal UID as the key.
     """
-    today = arrow.now().replace(hour=0, minute=0, second=0, microsecond=0)
     # retrieve events from the iCal feed
     logger.info('> Retrieving events from iCal feed')
     print('get ical')
@@ -183,13 +183,13 @@ def get_and_filter_ical_feed(ical_feed_url, days_to_sync, event_id_prefix,
     ical_events = {}
     for ev in ical_cal.events:
         # Filter out events in the past, don't care about syncing them.
-        if ev.begin <= today:
+        if ev.begin <= start_time:
             continue
         # Filter out events too far in the future.
-        if days_to_sync > 0 and (ev.begin - today).days >= days_to_sync:
+        if end_time and ev.begin >= end_time:
             logger.info(
-                u'Filtering out event {} at {} due to ICAL_DAYS_TO_SYNC={}'
-                .format(ev.name, ev.begin, days_to_sync))
+                u'Filtering out event {} at {} due to end date of {}'
+                .format(ev.name, ev.begin, end_time))
             continue
         if filter_func is not None and not filter_func(ev):
             continue
@@ -273,6 +273,7 @@ def delete_or_update_gcal_events(gcal_events, gcal_id, gcal_service, gcal_tz,
             event_dict = convert_ical_event_to_gcal(
                 ical_event=ical_event, gcal_tz=gcal_tz,
                 event_id_prefix=event_id_prefix)
+            mmslogin.set_gcal_attendees(event_dict)
 
             # check if the iCal event has a different: start/end time, name,
             # location, or description, and if so sync the changes to the GCal
@@ -288,6 +289,7 @@ def delete_or_update_gcal_events(gcal_events, gcal_id, gcal_service, gcal_tz,
 
                 gcal_service.events().update(
                     calendarId=gcal_id,
+                    sendUpdates='none',
                     eventId=eid, body=gcal_event).execute()
                 time.sleep(API_SLEEP_TIME)
     return
@@ -303,14 +305,14 @@ if __name__ == '__main__':
     logger.info('> Retrieving events from Google Calendar')
     print('get gcal')
     if ICAL_DAYS_TO_SYNC > 0:
-        end_time = (today +
-                    datetime.timedelta(days=ICAL_DAYS_TO_SYNC)).isoformat()
+        end_time = today + datetime.timedelta(days=ICAL_DAYS_TO_SYNC)
     else:
         end_time = None
-    gcal_events = get_gcal_events(service, CALENDAR_ID, today.isoformat(), end_time)
+    gcal_events = get_gcal_events(service, CALENDAR_ID,
+                                  today.isoformat(), end_time.isoformat())
 
     ical_events = get_and_filter_ical_feed(
-        ical_feed_url=ICAL_FEED, days_to_sync=ICAL_DAYS_TO_SYNC,
+        ical_feed_url=ICAL_FEED, start_time=today, end_time=end_time,
         event_id_prefix=UID_PREFIX, filter_func=mmslogin.keep_ical_event)
     if ical_events is None:
         # There was nothing found on the ical feed. Just exit rather than

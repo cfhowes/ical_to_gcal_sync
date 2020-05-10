@@ -154,14 +154,17 @@ def test_get_and_filter_ical_feed(requests_mock):
     # Calendar with 10 valid events.
     requests_mock.get(ical_feed_url, text=MOCK_ICS_FEED_RESPONSE)
 
-    resp = get_and_filter_ical_feed(ical_feed_url, 0, 'bob')
+    resp = get_and_filter_ical_feed(
+        ical_feed_url=ical_feed_url, start_time=arrow.utcnow(),
+        end_time=None, event_id_prefix='bob')
     assert len(resp) == 10
 
     # The events in our mock file are from June and July of the year 2222.
     # If this code is still running in 2222, I will be 242 years young!
-    day_count = (arrow.get(2222, 7, 1) - arrow.now()).days
-    resp = get_and_filter_ical_feed(ical_feed_url, day_count, 'bob')
-    assert len(resp) == 2
+    resp = get_and_filter_ical_feed(
+        ical_feed_url=ical_feed_url, start_time=arrow.utcnow(),
+        end_time=arrow.get(2222, 7, 1), event_id_prefix='bob')
+    assert len(resp) == 3
 
     def filter_func(ical_event):
         # A simple filter for testing.
@@ -172,7 +175,9 @@ def test_get_and_filter_ical_feed(requests_mock):
             pass
         return (eint % 2) == 0
 
-    resp = get_and_filter_ical_feed(ical_feed_url, 0, 'bob', filter_func)
+    resp = get_and_filter_ical_feed(
+        ical_feed_url=ical_feed_url, start_time=arrow.utcnow(),
+        end_time=None, event_id_prefix='bob', filter_func=filter_func)
     assert len(resp) == 5
 
 
