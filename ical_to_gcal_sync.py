@@ -278,11 +278,11 @@ def delete_or_update_gcal_events(gcal_events, gcal_id, gcal_service, gcal_tz,
             # check if the iCal event has a different: start/end time, name,
             # location, or description, and if so sync the changes to the GCal
             # event
-            if gcal_event['summary'] != event_dict['summary'] \
-               or gcal_event['description'] != event_dict['description'] \
-               or gcal_event['location'] != event_dict['location'] \
-               or gcal_event['start'] != event_dict['start'] \
-               or gcal_event['end'] != event_dict['end']:
+            if gcal_event.get('summary') != event_dict.get('summary') \
+               or gcal_event.get('description') != event_dict.get('description') \
+               or gcal_event.get('location') != event_dict.get('location') \
+               or gcal_event.get('start') != event_dict.get('start') \
+               or gcal_event.get('end') != event_dict.get('end'):
 
                 logger.info(f'> Updating event "{eid}" due to change...')
                 gcal_event.update(event_dict)
