@@ -218,7 +218,7 @@ def convert_ical_event_to_gcal(ical_event, gcal_tz, event_id_prefix):
                                  ical_event.begin,
                                  ical_event.end,
                                  event_id_prefix)
-    gcal_event['description'] = f'{ical_event.description} (Imported from mycal.py)'
+    gcal_event['description'] = f'{ical_event.description} (Imported)'
     gcal_event['location'] = ical_event.location
 
     # check if no time specified in iCal, treat as all day event if so
@@ -227,12 +227,12 @@ def convert_ical_event_to_gcal(ical_event, gcal_tz, event_id_prefix):
     # TODO multi-day events?
     if delta.days >= 1:
         gcal_event['start'] = get_gcal_date(ical_event.begin)
-        logger.info(f'iCal all-day event {ical_event.name} at {ical_event.begin}')
+        logger.debug(f'iCal all-day event {ical_event.name} at {ical_event.begin}')
         if ical_event.has_end:
             gcal_event['end'] = get_gcal_date(ical_event.end)
     else:
         gcal_event['start'] = get_gcal_datetime(ical_event.begin, gcal_tz)
-        logger.info(u'iCal event {ical_event.name} at {ical_event.begin}')
+        logger.debug(f'iCal event {ical_event.name} at {ical_event.begin}')
         if ical_event.has_end:
             gcal_event['end'] = get_gcal_datetime(ical_event.end, gcal_tz)
 
@@ -270,10 +270,12 @@ def delete_or_update_gcal_events(gcal_events, gcal_id, gcal_service, gcal_tz,
             # Get the ical_event and remove it from the list.
             ical_event = ical_events.pop(eid)
 
-            event_dict = convert_ical_event_to_gcal(
-                ical_event=ical_event, gcal_tz=gcal_tz,
-                event_id_prefix=event_id_prefix)
-            mmslogin.set_gcal_attendees(event_dict)
+            event_dict = ical_event.gcal_event \
+                if hasattr(ical_event, 'gcal_event') else None
+            if event_dict is None:
+                event_dict = convert_ical_event_to_gcal(
+                    ical_event=ical_event, gcal_tz=gcal_tz,
+                    event_id_prefix=event_id_prefix)
 
             # check if the iCal event has a different: start/end time, name,
             # location, or description, and if so sync the changes to the GCal

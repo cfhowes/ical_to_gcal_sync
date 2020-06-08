@@ -265,7 +265,7 @@ def test_delete_or_update_gcal_events(caplog):
     gcal_events.append({
         'id': 'bob4415832953301583316930',
         'summary': 'Test 3',
-        'description': 'Descr 3 (Imported from mycal.py)',
+        'description': 'Descr 3 (Imported)',
         'location': 'Location 3',
         'start': {'dateTime': '2020-03-04T04:15:30-08:00',
                   'timeZone': 'America/Los_Angeles'},
