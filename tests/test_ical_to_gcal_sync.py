@@ -7,11 +7,16 @@ from googleapiclient.discovery import build
 from googleapiclient.http import HttpMockSequence
 import pytest
 
-from ical_to_gcal_sync import *
+import ical_to_gcal_sync as igs
 import config
 
 from tests.mock_ics_feed_response import MOCK_ICS_FEED_RESPONSE
 from tests import mock_gcal_responses
+
+if 'get_current_events' not in igs.__dir__():
+    # When a package that uses this code as a submodule tries to run tests
+    # the packages seem to get messed up.
+    from ical_to_gcal_sync import ical_to_gcal_sync as igs
 
 
 def test_get_current_events(requests_mock):
@@ -22,12 +27,12 @@ def test_get_current_events(requests_mock):
 
     # Empty calendar response.
     requests_mock.get(ical_feed_url, text='')
-    cal = get_current_events(ical_feed_url)
+    cal = igs.get_current_events(ical_feed_url)
     assert cal is None
 
     # Calendar with 10 valid events.
     requests_mock.get(ical_feed_url, text=MOCK_ICS_FEED_RESPONSE)
-    cal = get_current_events(ical_feed_url)
+    cal = igs.get_current_events(ical_feed_url)
     assert len(cal.events) == 10
 
 
@@ -53,11 +58,11 @@ def test_get_gcal_events(requests_mock):
     # so we will just check the pagination logic.
 
     # This first fetch will get 1 page with 2 events.
-    gcal_data = get_gcal_events(service, '42', arrow.now(), None)
+    gcal_data = igs.get_gcal_events(service, '42', arrow.now(), None)
     assert len(gcal_data) == 2
 
     # This fetch will get 2 pages with a total of 7 events.
-    gcal_data = get_gcal_events(service, '42', arrow.now(), None)
+    gcal_data = igs.get_gcal_events(service, '42', arrow.now(), None)
     assert len(gcal_data) == 7
 
 
@@ -79,20 +84,20 @@ def test_get_gcal_datetime():
     test_date = arrow.get(2020, 3, 4, 10, 15, 30)
     assert test_date.tzinfo == tzutc()
 
-    res = get_gcal_datetime(test_date, test_tz)
+    res = igs.get_gcal_datetime(test_date, test_tz)
     # The time should be the same, but it had the new timezone added
     assert res['dateTime'].startswith(test_date.format('YYYY-MM-DDTHH:mm:ss'))
     assert res['timeZone'] == test_tz
 
-    res = get_gcal_datetime(test_date, test_tz, False)
+    res = igs.get_gcal_datetime(test_date, test_tz, False)
     # The time should not be the same because of timezone adjust.
     assert res['dateTime'].startswith(test_date.format('YYYY-MM-DDT02:mm:ss'))
     assert res['timeZone'] == test_tz
 
-    res1 = get_gcal_datetime(test_date.replace(tzinfo='America/New_York'),
-                             test_tz)
-    res2 = get_gcal_datetime(test_date.replace(tzinfo='America/New_York'),
-                             test_tz, False)
+    res1 = igs.get_gcal_datetime(test_date.replace(tzinfo='America/New_York'),
+                                 test_tz)
+    res2 = igs.get_gcal_datetime(test_date.replace(tzinfo='America/New_York'),
+                                 test_tz, False)
     # Since there is a non-UTC timzone provided, it should not be replaced
     # and both results should be the same.
     assert res1['dateTime'].startswith(test_date.format('YYYY-MM-DDT07:mm:ss'))
@@ -109,8 +114,8 @@ def test_get_gcal_date():
     assert test_date.tzinfo == tzutc()
 
     # No matter the timezone, it should be the same date.
-    res1 = get_gcal_date(test_date)
-    res2 = get_gcal_date(test_date.replace(tzinfo=test_tz))
+    res1 = igs.get_gcal_date(test_date)
+    res2 = igs.get_gcal_date(test_date.replace(tzinfo=test_tz))
 
     assert res1['date'] == test_date.format('YYYY-MM-DD')
     assert res1 == res2
@@ -126,22 +131,22 @@ def test_create_id():
     suffix = f'{begin_date.timestamp}{end_date.timestamp}'
 
     # No prefix.
-    uid = create_id('foo', begin_date, end_date, '')
+    uid = igs.create_id('foo', begin_date, end_date, '')
     assert uid.startswith('foo')
     assert uid.endswith(suffix)
 
     # Invalid prefix.
-    uid = create_id('foo', begin_date, end_date, '&')
+    uid = igs.create_id('foo', begin_date, end_date, '&')
     assert uid.startswith('foo')
     assert uid.endswith(suffix)
 
     # Invalid chars in id.
-    uid = create_id('f#o&o!!!', begin_date, end_date, '&')
+    uid = igs.create_id('f#o&o!!!', begin_date, end_date, '&')
     assert uid.startswith('foo')
     assert uid.endswith(suffix)
 
     # Valid prefix.
-    uid = create_id('foo', begin_date, end_date, 'bar')
+    uid = igs.create_id('foo', begin_date, end_date, 'bar')
     assert uid.startswith('barfoo')
     assert uid.endswith(suffix)
 
@@ -154,14 +159,14 @@ def test_get_and_filter_ical_feed(requests_mock):
     # Calendar with 10 valid events.
     requests_mock.get(ical_feed_url, text=MOCK_ICS_FEED_RESPONSE)
 
-    resp = get_and_filter_ical_feed(
+    resp = igs.get_and_filter_ical_feed(
         ical_feed_url=ical_feed_url, start_time=arrow.utcnow(),
         end_time=None, event_id_prefix='bob')
     assert len(resp) == 10
 
     # The events in our mock file are from June and July of the year 2222.
     # If this code is still running in 2222, I will be 242 years young!
-    resp = get_and_filter_ical_feed(
+    resp = igs.get_and_filter_ical_feed(
         ical_feed_url=ical_feed_url, start_time=arrow.utcnow(),
         end_time=arrow.get(2222, 7, 1), event_id_prefix='bob')
     assert len(resp) == 3
@@ -175,7 +180,7 @@ def test_get_and_filter_ical_feed(requests_mock):
             pass
         return (eint % 2) == 0
 
-    resp = get_and_filter_ical_feed(
+    resp = igs.get_and_filter_ical_feed(
         ical_feed_url=ical_feed_url, start_time=arrow.utcnow(),
         end_time=None, event_id_prefix='bob', filter_func=filter_func)
     assert len(resp) == 5
@@ -196,7 +201,7 @@ def test_convert_ical_event_to_gcal():
                                  description='Test Descriptions for Event 1',
                                  location='Conference Room 1')
 
-    resp = convert_ical_event_to_gcal(ical_event, gcal_tz, 'bob')
+    resp = igs.convert_ical_event_to_gcal(ical_event, gcal_tz, 'bob')
     assert resp['summary'] == ical_event.name
     assert resp['id'].startswith('bob42')
     assert resp['description'].startswith(ical_event.description)
@@ -292,7 +297,7 @@ def test_delete_or_update_gcal_events(caplog):
         description='Descr 3',
         location='Location 3')
 
-    delete_or_update_gcal_events(
+    igs.delete_or_update_gcal_events(
         gcal_events=gcal_events, gcal_id='42', gcal_service=service,
         gcal_tz='America/Los_Angeles',
         ical_events=ical_events, event_id_prefix='bob')
